@@ -5,12 +5,12 @@ float accelX, accelY, accelZ;
 float gyroX, gyroY, gyroZ;
 float roll, pitch;
 
-// Thresholds for canard modes in (m/s^2)
+// Thresholds for canard modes in (m/s^2) for now
 #define ACCEL_THRESHOLD 2.0
 #define BRAKE_THRESHOLD -2.0
 
 void setup() {
-    Serial.begin(115200); // Start Serial Monitor
+    Serial.begin(115200); // Start Serial Monitor at 115200 baud rate
     initializeIMU();      // Set up the IMU
 }
 
@@ -18,14 +18,14 @@ void loop() {
     // Step 1: Read IMU data
     readIMUData();
 
-    // Step 2: Process IMU data with complementary filter
+    // Step 2: Process IMU data with complementary filter algorithm
     roll = calculateRoll(accelX, accelY, accelZ);
     pitch = calculatePitch(accelX, accelY, accelZ);
 
     // Step 3: Determine canard mode and print results
     determineCanardMode(pitch, accelX);
 
-    delay(10); // Adjust loop frequency as needed
+    delay(10); // For now
 }
 
 // Function to initialize the IMU
@@ -33,7 +33,7 @@ void initializeIMU() {
     Serial.println("Initializing IMU...");
     if (!IMU.begin()) {
         Serial.println("Failed to initialize IMU! Check connections.");
-        while (1); // Halt execution if IMU fails
+        while (1); // Stop execution if IMU fails
     }
     Serial.println("IMU initialized successfully.");
 }
@@ -59,7 +59,7 @@ void readIMUData() {
     }
 }
 
-// Complementary filter to combine accelerometer and gyroscope data
+// Complementary filter algorithm to combine accelerometer and gyroscope data
 float complementaryFilter(float accelAngle, float gyroRate, float alpha = 0.98) {
     static float filteredAngle = 0.0; // Preserve filtered value between calls
     filteredAngle = alpha * (filteredAngle + gyroRate * 0.01) + (1 - alpha) * accelAngle;
