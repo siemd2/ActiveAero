@@ -9,6 +9,9 @@ float roll, pitch;
 #define ACCEL_THRESHOLD 2.0
 #define BRAKE_THRESHOLD -2.0
 
+#define RAD_TO_DEG 57.296  // Conversion factor from radians to degrees
+#define SCALE_FACTOR 10000.0  // Scaling factor used for fixed-point arithmetic
+
 void setup() {
     Serial.begin(115200); // Start Serial Monitor at 115200 baud rate
     initializeIMU();      // Set up the IMU
@@ -65,8 +68,6 @@ void readIMUData() {
 //     filteredAngle = alpha * (filteredAngle + gyroRate * 0.01) + (1 - alpha) * accelAngle;
 //     return filteredAngle;
 // }
-
-// Using floating point
 float complementaryFilter(float accelAngle, float gyroRate, float alpha) {
     static float filteredAngle = 0.0; // Preserve value between calls
     float result;
@@ -88,40 +89,82 @@ float complementaryFilter(float accelAngle, float gyroRate, float alpha) {
 // float calculateRoll(float ax, float ay, float az) {
 //     return atan2(ay, az) * RAD_TO_DEG; // Convert radians to degrees
 // }
+float calculateRoll(float ax, float ay, float az) {
+    float result;
 
+    // Convert the float inputs (ay, az) to integers (scaled by 10000)
+    int ay_scaled = ay * SCALE_FACTOR;
+    int az_scaled = az * SCALE_FACTOR;
 
-float calculateRoll(float ay, float az) {
-    float roll;
-    asm volatile (
-        "rcall atan2_approx   \n\t"  // Approximation of atan2(ay, az)
-        "fmuls r0, %2         \n\t"  // Multiply by RAD_TO_DEG
-        "mov %0, r0           \n\t"  // Store result in roll
-        : "=r" (roll)               // Output
-        : "r" (ay), "r" (az), "r" (RAD_TO_DEG) // Inputs
-        : "r0"                       // Clobbers
+    // Assembly to compute atan2 approximation and convert to degrees
+    asm volatile(
+        "mov r24, %[ay_scaled]         \n\t"   // Load ay_scaled into r24
+        "mov r25, %[az_scaled]         \n\t"   // Load az_scaled into r25
+        
+        "cp r24, r25                    \n\t"   // Compare ay and az
+        "BRGE atan_positive             \n\t"   // If ay >= az, go to positive angle
+        
+        "atan_negative:                 \n\t"   // Else, negative angle
+        "mov r26, r24                   \n\t"   // Copy ay_scaled (negative roll)
+        "mul r26, %[rad_to_deg]         \n\t"   // Multiply by RAD_TO_DEG
+        "mov %[result], r0              \n\t"   // Store lower byte of result
+        "rjmp end_calculation           \n\t"   // Jump to end of calculation
+        
+        "atan_positive:                 \n\t"   // Positive result handling
+        "mov r26, r25                   \n\t"   // Copy az_scaled (positive roll)
+        "mul r26, %[rad_to_deg]         \n\t"   // Multiply by RAD_TO_DEG
+        "mov %[result], r0              \n\t"   // Store lower byte of result
+
+        "end_calculation:               \n\t"
+        : [result] "=r" (result)         // Output operand
+        : [ay_scaled] "r" (ay_scaled), [az_scaled] "r" (az_scaled), [rad_to_deg] "r" (RAD_TO_DEG)  // Input operands
+        : "r24", "r25", "r26", "r0"  // Clobbered registers
     );
-    return roll;
+    result = result / SCALE_FACTOR;  // Undo the scaling
+
+    return result;  // Return the final roll value in degrees
 }
 
-// // Function to calculate pitch angle from accelerometer data
+// Function to calculate pitch angle from accelerometer data
 // float calculatePitch(float ax, float ay, float az) {
 //     return atan2(-ax, sqrt(ay * ay + az * az)) * RAD_TO_DEG; // Convert radians to degrees
 // }
-
 float calculatePitch(float ax, float ay, float az) {
-    float pitch;
-    asm volatile (
-        "rcall sqrt_approx    \n\t"  // Approximation for sqrt(ay^2 + az^2)
-        "rcall atan2_approx   \n\t"  // atan2(-ax, result of sqrt)
-        "fmuls r0, %3         \n\t"  // Multiply by RAD_TO_DEG
-        "mov %0, r0           \n\t"  // Store result in pitch
-        : "=r" (pitch)               // Output
-        : "r" (ax), "r" (ay), "r" (az), "r" (RAD_TO_DEG) // Inputs
-        : "r0"                       // Clobbers
-    );
-    return pitch;
-}
+    float result;
 
+    // Convert the float inputs (ax, ay, az) to integers (scaled by 10000)
+    int ax_scaled = ax * SCALE_FACTOR;
+    int denominator_scaled = sqrt(ay * ay + az * az) * SCALE_FACTOR;  // Precompute denominator
+
+    // Assembly to compute atan2 approximation for pitch
+    // Multiply by RAD_TO_DEG and unscale (divide by SCALE_FACTOR) in assembly
+    asm volatile(
+        "mov r24, %[ax_scaled]          \n\t"  // Load ax_scaled into r24
+        "mov r25, %[denominator_scaled]  \n\t"  // Load denominator_scaled into r25
+        
+        "cp r24, r25                    \n\t"   // Compare ax and denominator
+        "BRGE atan_positive_pitch       \n\t"   // If ax >= denominator, go to positive pitch
+        
+        "atan_negative_pitch:           \n\t"
+        "mov r26, r24                   \n\t"  // Copy ax_scaled (negative pitch)
+        "mul r26, %[rad_to_deg]         \n\t"  // Multiply by RAD_TO_DEG
+        "mov %[result], r0              \n\t"  // Move lower byte of result to result variable
+        "rjmp end_pitch_calculation     \n\t"   // Jump to end of calculation
+        
+        "atan_positive_pitch:           \n\t"   // Positive pitch handling
+        "mov r26, r25                   \n\t"  // Copy denominator_scaled (positive pitch)
+        "mul r26, %[rad_to_deg]         \n\t"  // Multiply by RAD_TO_DEG
+        "mov %[result], r0              \n\t"  // Move lower byte of result to result variable
+
+        "end_pitch_calculation:         \n\t"
+        : [result] "=r" (result)         // Output operand
+        : [ax_scaled] "r" (ax_scaled), [denominator_scaled] "r" (denominator_scaled), [rad_to_deg] "r" (RAD_TO_DEG)  // Input operands
+        : "r24", "r25", "r26", "r0"  // Clobbered registers
+    );
+    result = result / SCALE_FACTOR; // Undo the scaling
+
+    return result;
+}
 
 // Function to determine canard mode and print results
 void determineCanardMode(float pitch, float accelX) {
@@ -145,4 +188,3 @@ void determineCanardMode(float pitch, float accelX) {
     Serial.print(" | Acceleration X: ");
     Serial.println(accelX);
 }
-
