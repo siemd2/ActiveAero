@@ -1,6 +1,7 @@
 #include <Arduino_LSM9DS1.h>
+#include <Servo.h> // Include the Servo library
 
-// Global var
+// Global variables
 float accelX, accelY, accelZ;
 float gyroX, gyroY, gyroZ;
 float roll, pitch;
@@ -8,6 +9,11 @@ float roll, pitch;
 // Thresholds for canard modes in (m/s^2) for now
 #define ACCEL_THRESHOLD 2.0
 #define BRAKE_THRESHOLD -2.0
+#define ROLL_THRESHOLD 5.0 // Threshold in degrees to detect left or right turns
+
+// Servo objects for controlling the canards
+Servo leftCanardServo;
+Servo rightCanardServo;
 
 #define RAD_TO_DEG 57.296  // Conversion factor from radians to degrees
 #define SCALE_FACTOR 10000.0  // Scaling factor used for fixed-point arithmetic
@@ -15,6 +21,16 @@ float roll, pitch;
 void setup() {
     Serial.begin(115200); // Start Serial Monitor at 115200 baud rate
     initializeIMU();      // Set up the IMU
+
+    // Initialize the servo motors
+    Serial.println("Initializing servos...");
+    leftCanardServo.attach(3);  // Left canard on pin 3
+    rightCanardServo.attach(5); // Right canard on pin 5
+
+    // Set initial positions to Downforce (45°)
+    leftCanardServo.write(45);
+    rightCanardServo.write(45);
+    Serial.println("Servos initialized.");
 }
 
 void loop() {
@@ -25,8 +41,8 @@ void loop() {
     roll = calculateRoll(accelX, accelY, accelZ);
     pitch = calculatePitch(accelX, accelY, accelZ);
 
-    // Step 3: Determine canard mode and print results
-    determineCanardMode(pitch, accelX);
+    // Step 3: Determine canard mode and control servos
+    determineCanardMode(pitch, accelX, roll);
 
     delay(10); // For now
 }
@@ -166,25 +182,40 @@ float calculatePitch(float ax, float ay, float az) {
     return result;
 }
 
-// Function to determine canard mode and print results
-void determineCanardMode(float pitch, float accelX) {
+// Function to determine canard mode and control servos
+void determineCanardMode(float pitch, float accelX, float roll) {
     if (accelX > ACCEL_THRESHOLD) {
         // Acceleration Mode: Canards parallel to forward motion
         Serial.println("Mode: Acceleration");
-        Serial.println("Canard Position: 0° (Parallel to motion)");
+        leftCanardServo.write(0); // Left canard at 0°
+        rightCanardServo.write(0); // Right canard at 0°
     } else if (accelX < BRAKE_THRESHOLD) {
         // Braking Mode: Canards angled for air braking
         Serial.println("Mode: Braking");
-        Serial.println("Canard Position: 75° (Air braking with downforce)");
+        leftCanardServo.write(90); // Both canards at 90°
+        rightCanardServo.write(90);
+    } else if (roll < -ROLL_THRESHOLD) {
+        // Left Turn Mode: Adjust for left turn grip
+        Serial.println("Mode: Left Turn");
+        leftCanardServo.write(60); // Left canard adds more downforce
+        rightCanardServo.write(30); // Right canard reduces downforce
+    } else if (roll > ROLL_THRESHOLD) {
+        // Right Turn Mode: Adjust for right turn grip
+        Serial.println("Mode: Right Turn");
+        leftCanardServo.write(30); // Left canard reduces downforce
+        rightCanardServo.write(60); // Right canard adds more downforce
     } else {
         // Downforce Mode: Canards angled for grip and stability
         Serial.println("Mode: Downforce");
-        Serial.println("Canard Position: 45° (Stability)");
+        leftCanardServo.write(45); // Both canards at 45° for stability
+        rightCanardServo.write(45);
     }
 
     // Print processed data for debugging
     Serial.print("Pitch: ");
     Serial.print(pitch);
     Serial.print(" | Acceleration X: ");
-    Serial.println(accelX);
+    Serial.print(accelX);
+    Serial.print(" | Roll: ");
+    Serial.println(roll);
 }
