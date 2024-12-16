@@ -75,7 +75,7 @@ float complementaryFilter(float accelAngle, float gyroRate, float alpha) {
         "fmuls %1, %3         \n\t"  // alpha * gyroRate
         "fadds %4, r0         \n\t"  // Add filteredAngle
         "fmuls %2, %5         \n\t"  // (1 - alpha) * accelAngle
-        "fadds r0, r0         \n\t"  // Combine results
+        "fadds r0, r0, r1     \n\t"  // Combine results
         "mov %0, r0           \n\t"  // Move result to output
         : "=r" (result)              // Output
         : "r" (gyroRate), "r" (accelAngle), "r" (alpha), "r" (filteredAngle), "r" (1.0f - alpha) // Inputs
